@@ -107,6 +107,6 @@ if __name__ == "__main__":
 
             if done:
                 print("episode %d " % episode)
-                agent.update_every()
+                agent.update()
                 agent.samples.clear()
                 break
