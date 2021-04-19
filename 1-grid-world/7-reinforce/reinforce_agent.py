@@ -20,7 +20,7 @@ class PolicyNN(nn.Module):
             nn.Linear(24, 24),
             nn.ReLU(),
             nn.Linear(24, output_dim),
-            nn.Softmax()
+            nn.Softmax(dim=1)
         )
 
     def forward(self, x):
@@ -31,24 +31,30 @@ class PolicyLoss(nn.Module):
     def __init__(self):
         super(PolicyLoss, self).__init__()
 
-    def forward(self, x, actions, discounted_rewards):
-        action_prob = torch.sum(actions * x, dim=1)
-        cross_entropy = torch.log(action_prob) * discounted_rewards
+    def forward(self, predictions, actions, discounted_rewards):
+        action_probability = []
+        for (action_, prediction_) in zip(actions, predictions):
+            action_probability.append(action_ * prediction_)
+        action_probability = torch.cat(action_probability).sum()
+        cross_entropy = torch.log(action_probability) * discounted_rewards
         loss = - torch.sum(cross_entropy)
         return loss
 
 
 class PGAgent:
     def __init__(self):
-        self.load_model = True
+        self.load_model = False
         self.action_space = list(range(5))
         self.action_size = len(self.action_space)
         self.state_size = 15
         self.discount_factor = 0.99
-        self.learning_rate = 0.001
+        self.learning_rate = 0.005
 
-        self.model = PolicyNN(self.state_size, self.action_size)
-        self.optimizer = torch.optim.Adam(lr=self.learning_rate, params=self.model.parameters())
+        # self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = 'cpu'
+        print('Using {} device'.format(self.device))
+        self.model = PolicyNN(self.state_size, self.action_size).to(self.device)
+        self.optimizer = torch.optim.RMSprop(lr=self.learning_rate, params=self.model.parameters())
         self.loss_fn = PolicyLoss()
 
         self.states, self.actions, self.rewards, self.predictions = [], [], [], []
@@ -57,13 +63,17 @@ class PGAgent:
             self.model.load_state_dict(torch.load('./save_model/reinforce_trained.pth'))
 
     def get_action(self, state_):
-        policy = self.model(state_)[0]
-        self.predictions.append(policy)
-        return np.random.choice(self.action_size, 1, p=policy)[0]
+        prediction = self.model(state_)
+        policy = prediction[0]
+        # print(prediction, "\n", policy, "\n", type(prediction), type(policy))
+        dist = torch.distributions.Categorical(policy)
+        action_ = dist.sample()
+        self.predictions.append(prediction)
+        return action_.item()
 
     def discount_rewards(self, rewards_):
         discounted_rewards = torch.zeros_like(rewards_)
-        running_add = 0
+        running_add = 0.
         for t in reversed(range(len(rewards_))):
             running_add = running_add * self.discount_factor + rewards_[t]
             discounted_rewards[t] = running_add
@@ -77,14 +87,17 @@ class PGAgent:
         self.actions.append(act)
 
     def train_model(self):
-        discounted_rewards = torch.tensor(self.discount_rewards(self.rewards), dtype=torch.float32)
+        discounted_rewards = self.discount_rewards(torch.tensor(self.rewards, dtype=torch.float32, device=self.device))
         discounted_rewards -= torch.mean(discounted_rewards)
         discounted_rewards /= torch.std(discounted_rewards)
-
-        loss = self.loss_fn(self.predictions, self.actions, discounted_rewards)
+        loss = self.loss_fn(
+            self.predictions,
+            self.actions,
+            discounted_rewards)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
         self.actions = []
         self.states = []
         self.predictions = []
@@ -101,13 +114,13 @@ if __name__ == "__main__":
         done = False
         score = 0
         state = env.reset()
-        state = torch.tensor(state).view(1, 15)
+        state = torch.tensor(state, dtype=torch.float32, device=agent.device).view(1, 15)
 
         while not done:
             global_step += 1
             action = agent.get_action(state)
             next_state, reward, done = env.step(action)
-            next_state = torch.tensor(next_state).view(1, 15)
+            next_state = torch.tensor(next_state, dtype=torch.float32, device=agent.device).view(1, 15)
 
             agent.append_sample(state, action, reward)
             score += reward
