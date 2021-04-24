@@ -36,7 +36,6 @@ class QNN(nn.Module):
 
 class DQNAgent:
     def __init__(self, state_size_, action_size_):
-        # Turn off render option to get better efficiency
         self.render = False
         self.load_model = False
 
@@ -65,7 +64,7 @@ class DQNAgent:
         self.update_target_network()
 
         if self.load_model:
-            self.policy_net.load_state_dict(torch.load("./save_model/cartpole_dqn.pth"))
+            self.policy_net.load_state_dict(torch.load("./save_model/cartpole_ddqn.pth"))
 
     def update_target_network(self):
         self.target_net.load_state_dict(self.policy_net.state_dict())
@@ -99,33 +98,29 @@ class DQNAgent:
             done_.append(mini_batch[i][4])
 
         q_target = self.policy_net(update_input)
-        q_target_origin = q_target.clone()
+        q_next_target = self.policy_net(update_target).detach()
         q_value = self.target_net(update_target).detach()
+        q_target_origin = q_target.clone()
+        '''
+        Only about two lines of different code from Fixed Q-target
+            we use our policy net to predict the next action instead of 
+            choosing the maximum produced by target net.
+            It seems to be quite reasonable, 'cause the policy net is much
+            fresher than the target net, which has greater choices to produce
+            better predictions 
+        '''
 
         for i in range(self.batch_size):
             if done_[i]:
                 q_target[i][action_[i]] = reward_[i]
             else:
-                q_target[i][action_[i]] = reward_[i] + self.discount_factor * torch.amax(q_value[i])
+                a = torch.argmax(q_next_target[i])
+                q_target[i][action_[i]] = reward_[i] + self.discount_factor * q_value[i][a]
 
         loss = self.loss_fn(q_target_origin, q_target)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
-
-        ''' Some Notes:
-            1. There may be some confusions about the names. We have 2 networks.
-                in the formula δw = alpha*[reward + γ*max(Q'(s',a)) - Q(s,a)] * grad·Q(s,a)
-                Q' is a temporarily fixed value using Target network
-                Q is the target we are to optimize using DQ network
-            2. As mentioned above, Q' is a temporarily fixed value
-                we update it using direct-assignment method
-                and remove it from the gradient-descend process using detach method
-            3. WARNING: We calculate the mse loss between the original predicted q value
-                By the POLICY net and the updated POLICY net predictions , rather than the target net and the policy net
-                This FUCKING mistake COST ME up to TWO HOURS
-                 WHAT THE BLASTED FUCKING HELL OF THIS WORLD
-        '''
 
 
 if __name__ == "__main__":
@@ -170,12 +165,12 @@ if __name__ == "__main__":
                 scores.append(score)
                 episodes.append(e)
                 pylab.plot(episodes, scores, 'b')
-                pylab.savefig("./save_graph/cartpole_dqn.png")
+                pylab.savefig("./save_graph/cartpole_ddqn.png")
                 print("episode:", e, "  score:", score, "  memory length:", len(agent.memory), "  epsilon:", agent.epsilon)
 
                 if np.mean(scores[-min(10, len(scores)):]) > 490:
                     sys.exit()
         if e % 50 == 0:
-            torch.save(agent.policy_net.state_dict(), "./save_model/cartpole_dqn.pth")
+            torch.save(agent.policy_net.state_dict(), "./save_model/cartpole_ddqn.pth")
             print(datetime.now() - time_start)
             time_start = datetime.now()
