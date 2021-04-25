@@ -36,10 +36,20 @@ class PolicyLoss(nn.Module):
         super(PolicyLoss, self).__init__()
 
     def forward(self, predictions, actions, discounted_rewards):
+        """
         action_probability = []
         for (action_, prediction_) in zip(actions, predictions):
             action_probability.append(action_ * prediction_)
         action_probability = torch.cat(action_probability)
+        action_probability = torch.sum(action_probability, dim=1)
+        loss = - torch.log(action_probability) * discounted_rewards
+        loss = loss.sum()
+        return loss
+        """
+        # Choose either method, but it seems that the current one is more efficient
+        # But I don't know why the original one works better (on the score) in the
+        # first 200 episodes... Maybe some tricks with computation graph
+        action_probability = torch.cat(actions) * torch.cat(predictions)
         action_probability = torch.sum(action_probability, dim=1)
         loss = - torch.log(action_probability) * discounted_rewards
         loss = loss.sum()
