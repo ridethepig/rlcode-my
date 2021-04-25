@@ -35,7 +35,8 @@ class PolicyLoss(nn.Module):
         action_probability = []
         for (action_, prediction_) in zip(actions, predictions):
             action_probability.append(action_ * prediction_)
-        action_probability = torch.cat(action_probability).sum()
+        action_probability = torch.cat(action_probability)
+        action_probability = torch.sum(action_probability, dim=1)
         cross_entropy = torch.log(action_probability) * discounted_rewards
         loss = - torch.sum(cross_entropy)
         return loss
@@ -83,7 +84,7 @@ class PGAgent:
         self.states.append(state_[0])
         self.rewards.append(reward_)
         act = torch.zeros(self.action_size)
-        act[action_] = 1
+        act[action_] = 1.
         self.actions.append(act)
 
     def train_model(self):
